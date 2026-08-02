@@ -1110,7 +1110,8 @@
             async loadAndSetImage(baseName, element) {
                 if (!baseName) return;
 
-                const extensions = ['.png', '.jpeg', '.jpg'];
+                // Добавили .webp на первое место для приоритетной и быстрой загрузки
+                const extensions = ['.webp', '.png', '.jpeg', '.jpg'];
                 
                 const validUrl = await new Promise((resolve) => {
                     let failedCount = 0;
