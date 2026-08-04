@@ -978,13 +978,152 @@
             turnPage(direction) {
                 if (this.isAnimating || window.bookState !== "STATE_OPEN") return;
                 
-                // Прайминг финального видео: привязываем видео к физическому клику
-                const outro = document.getElementById('outroVideo');
-                if (outro && outro.paused) {
-                    let p = outro.play();
-                    if (p !== undefined) p.then(() => outro.pause()).catch(e => {});
-                }
+                if (this.cloudTimer) clearTimeout(this.cloudTimer);
+                document.querySelectorAll('.passing-cloud').forEach(el => el.classList.remove('passing-cloud'));
+                
+                this.stopVoiceover();
+                
+                const leaves = document.querySelectorAll('.leaf');
+                const mobilePages = document.querySelectorAll('.mobile-page');
+                
+                if (this.isMobileReader) {
+                    if (direction === 'next') {
+                        if (this.currentPageIndex >= mobilePages.length) { this.closeBook(); return; }
+                        this.isAnimating = true; this.playPageTurnSound();
+                        const currentPage = mobilePages[this.currentPageIndex];
+                        if (currentPage) { currentPage.classList.remove('is-active'); currentPage.classList.add('is-turned'); }
+                        
+                        this.currentPageIndex++;
+                        const nextPage = mobilePages[this.currentPageIndex];
+                        if (nextPage) nextPage.classList.add('is-active');
+                        
+                        this.updateZIndices();
+                        setTimeout(() => this.finalizeTurn(), 400);
 
+                    } else if (direction === 'prev') {
+                        if (this.currentPageIndex <= 0) return;
+                        this.isAnimating = true; this.playPageTurnSound();
+                        const currentPage = mobilePages[this.currentPageIndex];
+                        if (currentPage) currentPage.classList.remove('is-active');
+                        
+                        this.currentPageIndex--;
+                        const prevPage = mobilePages[this.currentPageIndex];
+                        if (prevPage) { prevPage.classList.remove('is-turned'); prevPage.classList.add('is-active'); }
+
+                        this.updateZIndices();
+                        setTimeout(() => this.finalizeTurn(), 400);
+                    }
+                } else {
+                    if (direction === 'next') {
+                        if (this.currentLeafIndex >= leaves.length) return; 
+                        this.isAnimating = true; this.playPageTurnSound();
+                        const leaf = leaves[this.currentLeafIndex];
+                        leaf.classList.add('is-turned');
+                        this.updateZIndices(this.currentLeafIndex);
+                        setTimeout(() => { this.currentLeafIndex++; this.finalizeTurn(); }, 1500);
+
+                    } else if (direction === 'prev') {
+                        if (this.currentLeafIndex <= 0) return; 
+                        this.isAnimating = true; this.playPageTurnSound();
+                        const leaf = leaves[this.currentLeafIndex - 1];
+                        leaf.classList.remove('is-turned');
+                        this.updateZIndices(this.currentLeafIndex - 1);
+                        setTimeout(() => { this.currentLeafIndex--; this.finalizeTurn(); }, 1500);
+                    }
+                }
+            }
+
+            finalizeTurn() {
+                this.updateZIndices();
+                this.isAnimating = false;
+                
+                const maxIndex = this.isMobileReader ? document.querySelectorAll('.mobile-page').length : document.querySelectorAll('.leaf').length;
+                const currentIndex = this.isMobileReader ? this.currentPageIndex : this.currentLeafIndex;
+                
+                localStorage.setItem('evdokia_progress', currentIndex);
+                
+                this.loadVisiblePages(); 
+
+                if (currentIndex === maxIndex) {
+                    localStorage.setItem('evdokia_book_finished', 'true'); 
+                    setTimeout(() => { if (window.bookState === "STATE_OPEN") this.closeBook(); }, 400);
+                } else {
+                    this.triggerCloudShadow();
+                    this.triggerPageReveal();
+                    this.playVoiceover();
+                }
+            }
+
+            toggleReadingMode() {
+                this.isReadingMode = !this.isReadingMode;
+                const layout = document.getElementById('layoutShifter');
+                const btn = document.getElementById('readingBtn');
+                
+                if (this.isReadingMode) {
+                    layout.style.transform = `scale(1.1)`;
+                    document.documentElement.style.setProperty('--bg-color', '#02040a');
+                    btn.style.color = "#fff";
+                    btn.style.background = "rgba(255,255,255,0.1)";
+                } else {
+                    layout.style.transform = `scale(1)`;
+                    document.documentElement.style.setProperty('--bg-color', '#050a15');
+                    btn.style.color = "#ffe696";
+                    btn.style.background = "rgba(10, 15, 30, 0.6)";
+                }
+                this.updateLayout();
+            }
+
+            toggleAudioMode() {
+                this.isAudioMode = !this.isAudioMode;
+                const btn = document.getElementById('audioBtn');
+                if (this.isAudioMode) {
+                    btn.innerHTML = '🔊'; btn.style.color = "#fff"; btn.style.background = "rgba(255,255,255,0.1)";
+                    this.playVoiceover();
+                } else {
+                    btn.innerHTML = '🔇'; btn.style.color = "#ffe696"; btn.style.background = "rgba(10, 15, 30, 0.6)";
+                    this.stopVoiceover();
+                }
+            }
+
+            playSingleAudio(baseName) {
+                return new Promise((resolve) => {
+                    this.voiceoverResolve = resolve;
+                    const audio = new Audio('audio/' + baseName + '.wav');
+                    this.currentVoiceover = audio;
+                    
+                    audio.onended = () => { this.currentVoiceover = null; if (this.voiceoverResolve) this.voiceoverResolve(); };
+                    audio.onerror = () => { this.currentVoiceover = null; if (this.voiceoverResolve) this.voiceoverResolve(); };
+                    
+                    audio.play().catch(e => { this.currentVoiceover = null; if (this.voiceoverResolve) this.voiceoverResolve(); });
+                });
+            }
+
+            stopVoiceover() {
+                if (this.currentVoiceover) {
+                    this.currentVoiceover.pause(); this.currentVoiceover.currentTime = 0; this.currentVoiceover = null;
+                }
+                if (this.voiceoverResolve) { this.voiceoverResolve(); this.voiceoverResolve = null; }
+            }
+
+            async playVoiceover() {
+                if (!this.isAudioMode || this.isAnimating || window.bookState !== "STATE_OPEN") return;
+                this.stopVoiceover();
+
+                if (this.isMobileReader) {
+                    const pageName = this.pages[this.currentPageIndex];
+                    if (pageName) await this.playSingleAudio(pageName);
+                } else {
+                    const idx = this.currentLeafIndex;
+                    const leftPage = idx > 0 ? this.pages[idx * 2 - 1] : null;
+                    const rightPage = idx * 2 < this.pages.length ? this.pages[idx * 2] : null;
+                    if (leftPage) await this.playSingleAudio(leftPage);
+                    if (this.isAudioMode && this.currentLeafIndex === idx && rightPage) await this.playSingleAudio(rightPage);
+                }
+            }
+
+            closeBook() {
+                if (window.bookState !== "STATE_OPEN" || this.isAnimating) return;
+                
                 if (this.cloudTimer) clearTimeout(this.cloudTimer);
                 document.querySelectorAll('.passing-cloud').forEach(el => el.classList.remove('passing-cloud'));
                 
@@ -1141,12 +1280,10 @@
                         playPromise.catch((e) => {
                             console.warn("Автозапуск финального видео заблокирован", e);
                             
-                            // БРОНЕБОЙНЫЙ ЗАПАСНОЙ ПЛАН: показываем красивую кнопку запуска
+                            // Блокировка обойдена: показываем кнопку ручного запуска
                             const playBtn = document.createElement('button');
                             playBtn.innerHTML = "Смотреть финал ▶";
-                            playBtn.style.cssText = "position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(10, 15, 30, 0.8); color:rgba(255, 230, 150, 0.9); border:1px solid rgba(255, 230, 150, 0.5); padding:20px 40px; font-size:1.5rem; font-family:'Georgia', serif; border-radius:30px; cursor:pointer; z-index:10002; box-shadow:0 0 40px rgba(176, 210, 255, 0.4); backdrop-filter:blur(5px); transition: transform 0.3s ease;";
-                            playBtn.onmouseover = () => playBtn.style.transform = "translate(-50%, -50%) scale(1.05)";
-                            playBtn.onmouseout = () => playBtn.style.transform = "translate(-50%, -50%) scale(1)";
+                            playBtn.style.cssText = "position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); background:rgba(10, 15, 30, 0.8); color:rgba(255, 230, 150, 0.9); border:1px solid rgba(255, 230, 150, 0.5); padding:20px 40px; font-size:1.5rem; font-family:'Georgia', serif; border-radius:30px; cursor:pointer; z-index:10002; box-shadow:0 0 40px rgba(176, 210, 255, 0.4); backdrop-filter:blur(5px);";
                             
                             playBtn.onclick = () => {
                                 playBtn.remove();
