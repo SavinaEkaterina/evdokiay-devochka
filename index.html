@@ -412,14 +412,14 @@
     <div id="touchPrompt">Прикоснитесь к книге…<br>Лунный свет уже ждёт вас. 🌙</div>
     
     <div id="prologueContainer">
-        <!-- Атрибут poster для оживающего кадра -->
-        <video id="introVideo" playsinline preload="auto" poster="video/intro-poster.webp"></video>
+        <!-- Атрибут poster для оживающего кадра. Путь src прописан сразу для предзагрузки! -->
+        <video id="introVideo" src="video/intro.mp4" playsinline preload="auto" poster="video/intro-poster.webp"></video>
         <button id="skipIntroBtn">Пропустить вступление</button>
     </div>
 
     <div id="epilogueContainer">
-        <!-- Отложенная загрузка финала для экономии трафика -->
-        <video id="outroVideo" playsinline muted preload="none"></video>
+        <!-- Отложенная загрузка финала для экономии трафика. Путь src прописан сразу! -->
+        <video id="outroVideo" src="video/outro.mp4" playsinline muted preload="none"></video>
         <button id="skipOutroBtn">Пропустить видео</button>
     </div>
 
@@ -1311,6 +1311,96 @@
             const startBtn = document.getElementById('startBtn');
 
             startBtn.onclick = async () => {
+                // 1. МГНОВЕННЫЙ ЗАПУСК ВИДЕО (до любых await, обходим блокировки Safari/iOS)
+                let prologueEnded = false;
+                const endPrologue = () => {
+                    if (prologueEnded) return;
+                    prologueEnded = true;
+
+                    const layoutShifter = document.getElementById('layoutShifter');
+                    const moonlightGlow = document.getElementById('moonlightGlow');
+
+                    introVideo.classList.add('fade-out');
+                    skipIntroBtn.style.opacity = '0';
+                    skipIntroBtn.style.pointerEvents = 'none';
+                    
+                    layoutShifter.style.transition = 'none';
+                    layoutShifter.style.opacity = '0';
+                    layoutShifter.style.transform = 'scale(0.95)';
+                    
+                    setTimeout(() => {
+                        prologueContainer.style.display = 'none';
+                        
+                        setTimeout(() => {
+                            moonlightGlow.classList.add('cinematic-glow');
+                            
+                            requestAnimationFrame(() => {
+                                layoutShifter.style.transition = 'opacity 1s ease-out, transform 1s ease-out';
+                                layoutShifter.style.opacity = '1';
+                                layoutShifter.style.transform = 'scale(0.98)';
+                                blackOverlay.classList.add('hidden');
+                            });
+                            
+                            setTimeout(() => {
+                                blackOverlay.style.display = 'none';
+                                
+                                layoutShifter.style.transition = 'transform 0.8s ease-out';
+                                layoutShifter.style.transform = 'scale(1)';
+                                moonlightGlow.classList.remove('cinematic-glow');
+                                
+                                setTimeout(() => {
+                                    setTimeout(() => {
+                                        window.engine.isAnimating = false; 
+                                        
+                                        layoutShifter.style.transition = 'transform 1.5s cubic-bezier(0.645, 0.045, 0.355, 1)';
+                                        layoutShifter.style.opacity = '';
+                                        layoutShifter.style.transform = '';
+
+                                        setTimeout(() => {
+                                            if (window.bookState === "STATE_COVER") {
+                                                if (touchPrompt) {
+                                                    touchPrompt.classList.add('show');
+                                                    window.promptTimeout = setTimeout(() => {
+                                                        touchPrompt.classList.remove('show');
+                                                    }, 7000);
+                                                }
+                                                
+                                                const coverBeam = document.getElementById('coverBeam');
+                                                if (coverBeam) coverBeam.classList.add('play-beam');
+                                            }
+                                        }, 500);
+
+                                    }, 500);
+                                }, 800);
+                            }, 1000);
+                        }, 1000); 
+                    }, 1500); 
+                };
+
+                if (ENABLE_INTRO) {
+                    introVideo.muted = false; 
+                    introVideo.addEventListener('ended', endPrologue);
+                    skipIntroBtn.addEventListener('click', endPrologue);
+                    introVideo.addEventListener('error', (e) => {
+                        console.warn("Видео не найдено. Пропуск пролога.", e);
+                        endPrologue();
+                    });
+
+                    // Запускаем видео СРАЗУ
+                    let playPromise = introVideo.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch((e) => {
+                            console.warn("Автозапуск заблокирован браузером. Пропуск пролога.", e);
+                            endPrologue();
+                        });
+                    }
+                    window.engine.isAnimating = true; 
+                } else {
+                    prologueContainer.style.display = 'none';
+                    blackOverlay.style.display = 'none';
+                }
+
+                // 2. ТОЛЬКО ТЕПЕРЬ запускаем аудио-движок (Tone.js) и убираем стартовый экран
                 try { 
                     if (typeof Tone !== 'undefined') {
                         await Tone.start(); 
@@ -1322,96 +1412,6 @@
 
                 startScreen.style.opacity = '0';
                 setTimeout(() => { startScreen.style.display = 'none'; }, 800);
-
-                if (ENABLE_INTRO) {
-                    introVideo.src = INTRO_VIDEO;
-                    introVideo.muted = false; 
-                    
-                    window.engine.isAnimating = true; 
-                    let prologueEnded = false;
-
-                    const endPrologue = () => {
-                        if (prologueEnded) return;
-                        prologueEnded = true;
-
-                        const layoutShifter = document.getElementById('layoutShifter');
-                        const moonlightGlow = document.getElementById('moonlightGlow');
-
-                        introVideo.classList.add('fade-out');
-                        skipIntroBtn.style.opacity = '0';
-                        skipIntroBtn.style.pointerEvents = 'none';
-                        
-                        layoutShifter.style.transition = 'none';
-                        layoutShifter.style.opacity = '0';
-                        layoutShifter.style.transform = 'scale(0.95)';
-                        
-                        setTimeout(() => {
-                            prologueContainer.style.display = 'none';
-                            
-                            setTimeout(() => {
-                                moonlightGlow.classList.add('cinematic-glow');
-                                
-                                requestAnimationFrame(() => {
-                                    layoutShifter.style.transition = 'opacity 1s ease-out, transform 1s ease-out';
-                                    layoutShifter.style.opacity = '1';
-                                    layoutShifter.style.transform = 'scale(0.98)';
-                                    blackOverlay.classList.add('hidden');
-                                });
-                                
-                                setTimeout(() => {
-                                    blackOverlay.style.display = 'none';
-                                    
-                                    layoutShifter.style.transition = 'transform 0.8s ease-out';
-                                    layoutShifter.style.transform = 'scale(1)';
-                                    moonlightGlow.classList.remove('cinematic-glow');
-                                    
-                                    setTimeout(() => {
-                                        setTimeout(() => {
-                                            window.engine.isAnimating = false; 
-                                            
-                                            layoutShifter.style.transition = 'transform 1.5s cubic-bezier(0.645, 0.045, 0.355, 1)';
-                                            layoutShifter.style.opacity = '';
-                                            layoutShifter.style.transform = '';
-
-                                            setTimeout(() => {
-                                                if (window.bookState === "STATE_COVER") {
-                                                    if (touchPrompt) {
-                                                        touchPrompt.classList.add('show');
-                                                        window.promptTimeout = setTimeout(() => {
-                                                            touchPrompt.classList.remove('show');
-                                                        }, 7000);
-                                                    }
-                                                    
-                                                    const coverBeam = document.getElementById('coverBeam');
-                                                    if (coverBeam) coverBeam.classList.add('play-beam');
-                                                }
-                                            }, 500);
-
-                                        }, 500);
-                                    }, 800);
-                                }, 1000);
-                            }, 1000); 
-                        }, 1500); 
-                    };
-
-                    introVideo.addEventListener('ended', endPrologue);
-                    skipIntroBtn.addEventListener('click', endPrologue);
-                    introVideo.addEventListener('error', (e) => {
-                        console.warn("Видео не найдено. Пропуск пролога.", e);
-                        endPrologue();
-                    });
-                    
-                    let playPromise = introVideo.play();
-                    if (playPromise !== undefined) {
-                        playPromise.catch((e) => {
-                            console.warn("Автозапуск заблокирован браузером. Пропуск пролога.", e);
-                            endPrologue();
-                        });
-                    }
-                } else {
-                    prologueContainer.style.display = 'none';
-                    blackOverlay.style.display = 'none';
-                }
             };
         };
 
